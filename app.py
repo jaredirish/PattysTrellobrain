@@ -496,7 +496,10 @@ with st.sidebar:
 col1, col2 = st.columns([3, 1])
 with col1:
     st.header("🧠 Ask Your Knowledge Base")
-    st.caption("Search Trello, documents, and audio transcripts. Get copy-ready output.")
+    if stats["trello_cards"] > 0:
+        st.caption(f"Search across {stats['trello_cards']} Trello cards from {len(stats['boards'])} boards. No Trello connection needed.")
+    else:
+        st.caption("Sync once, search forever. All your Trello boards in one place.")
 
 with col2:
     clients = db.get_all_clients()
@@ -528,20 +531,25 @@ gemini_ready = bool(st.session_state.get("gemini_api_key"))
 has_content = stats["trello_cards"] > 0 or stats["documents"] > 0 or stats["castmagic"] > 0
 
 if not gemini_ready:
-    st.warning("👈 Enter your Gemini API key in the sidebar to get started.")
+    if has_content:
+        st.warning(f"👈 Enter your Gemini API key to search your {stats['trello_cards']} stored cards. Your data is safe in the local database!")
+    else:
+        st.warning("👈 Enter your Gemini API key in the sidebar to get started.")
 
 if not has_content:
     st.info("""
-    **No content yet!**
-    1. **Sync Trello** - Add API keys in sidebar, then click Sync
-    2. **Upload Docs** - Drop PDFs, transcripts, or text files
-    3. **Add Audio** - Use Cast Magic to transcribe podcasts/videos
+    **Get Started in 2 Minutes:**
 
-    Once indexed, ask questions like:
-    - "Find Veronica's webinar prompt sequence"
-    - "What frameworks do I have for email sequences?"
-    - "Apply the sales funnel template for Karen"
-    - "Summarize the key points from my latest podcast"
+    1. Enter your **Gemini API key** (free at aistudio.google.com)
+    2. Enter your **Trello API key + token** (from trello.com/power-ups/admin)
+    3. Click **Sync Trello** - pulls ALL your boards into a local database
+
+    **That's it!** After syncing, your data is stored locally. You can search across ALL 300+ boards without needing Trello open.
+
+    Try searches like:
+    - "Find Veronica's webinar prompt"
+    - "What email sequence frameworks do I have?"
+    - "Show me everything about sales funnels"
     """)
 
 # Quick Actions

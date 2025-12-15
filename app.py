@@ -45,6 +45,48 @@ st.markdown("""
         padding: 12px;
         margin: 8px 0;
     }
+    /* Premium Option C: The "Action Tease" */
+    .premium-card-c {
+        border: 1px solid #ddd;
+        border-left: 5px solid #ff4b4b; /* Streamlit Red/Pink */
+        border-radius: 8px;
+        padding: 15px;
+        background-color: white;
+        display: flex;
+        justify_content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+    }
+    .premium-text-group {
+        display: flex;
+        flex-direction: column;
+    }
+    .premium-title {
+        font-weight: bold;
+        font-size: 16px;
+        margin: 0;
+        color: #333; /* Ensure contrast */
+    }
+    .premium-desc {
+        font-size: 12px;
+        color: #666; /* Ensure contrast */
+        margin: 0;
+    }
+    .upgrade-btn-c {
+        background-color: #ff4b4b;
+        color: white;
+        border: none;
+        padding: 6px 12px;
+        border-radius: 5px;
+        font-weight: 600;
+        cursor: pointer;
+        text-transform: uppercase;
+        font-size: 12px;
+        text-decoration: none;
+    }
+    .upgrade-btn-c:hover {
+        background-color: #e04444;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -124,8 +166,8 @@ def process_uploaded_file(uploaded_file) -> tuple[str, str]:
 
 def get_trello_client():
     """Create a Trello client from session state credentials."""
-    api_key = st.session_state.get("trello_api_key", "")
-    token = st.session_state.get("trello_token", "")
+    api_key = st.session_state.get("trello_api_key", "").strip()
+    token = st.session_state.get("trello_token", "").strip()
     if api_key and token:
         return TrelloClient(api_key, token)
     return None
@@ -178,7 +220,7 @@ def run_query(prompt: str, include_client: bool = True):
         st.error("Please enter a Gemini API key first.")
         return None
 
-    genai.configure(api_key=gemini_key)
+    genai.configure(api_key=gemini_key.strip())
 
     # Build context
     context = db.get_all_content()
@@ -221,11 +263,19 @@ USER REQUEST:
 Provide a helpful, organized, COPY-READY response:"""
 
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
+        model = genai.GenerativeModel('gemini-2.0-flash')
         response = model.generate_content(system_prompt)
         return response.text
     except Exception as e:
-        st.error(f"Error: {str(e)}")
+        error_msg = str(e)
+        if "404" in error_msg:
+             try:
+                 models = list(genai.list_models())
+                 valid_models = [m.name for m in models if 'generateContent' in m.supported_generation_methods]
+                 error_msg += f"\n\nAvailable models: {', '.join(valid_models)}"
+             except:
+                 pass
+        st.error(f"Error: {error_msg}")
         return None
 
 
@@ -235,21 +285,23 @@ with st.sidebar:
 
     # Quick stats
     stats = db.get_stats()
-    cols = st.columns(4)
+    cols = st.columns(2)
     with cols[0]:
-        st.metric("Cards", stats["trello_cards"])
+        st.metric("Boards", len(stats["boards"]))
     with cols[1]:
+        st.metric("Cards", stats["trello_cards"])
+    
+    cols2 = st.columns(2)
+    with cols2[0]:
         st.metric("Docs", stats["documents"])
-    with cols[2]:
-        st.metric("Audio", stats["castmagic"])
-    with cols[3]:
+    with cols2[1]:
         st.metric("Clients", stats["clients"])
 
     st.caption(f"Last sync: {format_time_ago(stats['last_sync'])}")
     st.divider()
 
     # --- Tabs for different settings ---
-    tab1, tab2, tab3, tab4 = st.tabs(["API Keys", "Trello", "Cast Magic", "Clients"])
+    tab1, tab2, tab3, tab4 = st.tabs(["Keys", "Trello", "Clients", "✨ Upgrades"])
 
     with tab1:
         st.subheader("API Configuration")
@@ -278,9 +330,14 @@ with st.sidebar:
         )
 
         if gemini_key:
+            clean_key = gemini_key.strip()
+            if clean_key != gemini_key:
+                st.session_state.gemini_api_key = clean_key
+                st.rerun()
+
             # Save if changed
-            if gemini_key != db.get_metadata("api_key_gemini"):
-                db.set_metadata("api_key_gemini", gemini_key)
+            if clean_key != db.get_metadata("api_key_gemini"):
+                db.set_metadata("api_key_gemini", clean_key)
                 db.set_metadata("api_validated_gemini", "false")  # Reset validation
 
             # Test button
@@ -289,15 +346,24 @@ with st.sidebar:
                 if st.button("Test", key="test_gemini", use_container_width=True):
                     with st.spinner("🔄"):
                         try:
-                            genai.configure(api_key=gemini_key)
-                            model = genai.GenerativeModel('gemini-1.5-flash')
+                            genai.configure(api_key=clean_key)
+                            model = genai.GenerativeModel('gemini-2.0-flash')
                             model.generate_content("Say 'ok'")
                             db.set_metadata("api_validated_gemini", "true")
-                            st.success("✅ Valid!")
+                            st.toast("✅ Gemini API Valid!", icon="🎉")
                             st.rerun()
                         except Exception as e:
                             db.set_metadata("api_validated_gemini", "false")
-                            st.error(f"❌ Invalid: {str(e)[:50]}")
+                            error_msg = str(e)
+                            if "404" in error_msg:
+                                try:
+                                    models = list(genai.list_models())
+                                    valid_models = [m.name for m in models if 'generateContent' in m.supported_generation_methods]
+                                    error_msg += f"\n\nAvailable models: {', '.join(valid_models)}"
+                                except:
+                                    pass
+                            st.toast(f"❌ Invalid: {error_msg}", icon="⚠️")
+
             with col1:
                 if gemini_validated:
                     st.caption("✅ Tested & ready")
@@ -337,25 +403,35 @@ with st.sidebar:
         )
 
         if trello_api_key and trello_token:
+            clean_key = trello_api_key.strip()
+            clean_token = trello_token.strip()
+            
+            if clean_key != trello_api_key:
+                st.session_state.trello_api_key = clean_key
+                st.rerun()
+            if clean_token != trello_token:
+                st.session_state.trello_token = clean_token
+                st.rerun()
+
             # Save if changed
-            if trello_api_key != db.get_metadata("api_key_trello") or trello_token != db.get_metadata("api_key_trello_token"):
-                db.set_metadata("api_key_trello", trello_api_key)
-                db.set_metadata("api_key_trello_token", trello_token)
+            if clean_key != db.get_metadata("api_key_trello") or clean_token != db.get_metadata("api_key_trello_token"):
+                db.set_metadata("api_key_trello", clean_key)
+                db.set_metadata("api_key_trello_token", clean_token)
                 db.set_metadata("api_validated_trello", "false")
 
             col1, col2 = st.columns([3, 1])
             with col2:
                 if st.button("Test", key="test_trello", use_container_width=True):
                     with st.spinner("🔄"):
-                        client = TrelloClient(trello_api_key, trello_token)
+                        client = TrelloClient(clean_key, clean_token)
                         success, msg = client.test_connection()
                         if success:
                             db.set_metadata("api_validated_trello", "true")
-                            st.success(f"✅ {msg}")
+                            st.toast(f"✅ {msg}", icon="🎉")
                             st.rerun()
                         else:
                             db.set_metadata("api_validated_trello", "false")
-                            st.error(f"❌ {msg}")
+                            st.toast(f"❌ {msg}", icon="⚠️")
             with col1:
                 if trello_validated:
                     st.caption("✅ Tested & ready")
@@ -387,7 +463,13 @@ with st.sidebar:
         )
 
         if castmagic_key:
-            if castmagic_key != db.get_metadata("api_key_castmagic"):
+            clean_key = castmagic_key.strip()
+            if clean_key != castmagic_key:
+                st.session_state.castmagic_api_key = clean_key
+                st.rerun()
+
+            if clean_key != db.get_metadata("api_key_castmagic"):
+                db.set_metadata("api_key_castmagic", clean_key)
                 db.set_metadata("api_key_castmagic", castmagic_key)
                 db.set_metadata("api_validated_castmagic", "false")
 
@@ -395,15 +477,15 @@ with st.sidebar:
             with col2:
                 if st.button("Test", key="test_castmagic", use_container_width=True):
                     with st.spinner("🔄"):
-                        cm_client = CastMagicClient(castmagic_key)
+                        cm_client = CastMagicClient(clean_key)
                         success, msg = cm_client.test_connection()
                         if success:
                             db.set_metadata("api_validated_castmagic", "true")
-                            st.success(f"✅ {msg}")
+                            st.toast(f"✅ {msg}", icon="🎉")
                             st.rerun()
                         else:
                             db.set_metadata("api_validated_castmagic", "false")
-                            st.error(f"❌ {msg}")
+                            st.toast(f"❌ {msg}", icon="⚠️")
             with col1:
                 if castmagic_validated:
                     st.caption("✅ Tested & ready")
@@ -477,110 +559,6 @@ with st.sidebar:
                 st.rerun()
 
     with tab3:
-        st.subheader("Cast Magic")
-        st.caption("Transcribe audio/video and add to your knowledge base")
-
-        cm_client = get_castmagic_client()
-        if cm_client:
-            # Submit new transcription
-            with st.expander("🎙 Submit Audio/Video", expanded=True):
-                audio_url = st.text_input(
-                    "Audio/Video URL",
-                    placeholder="YouTube URL or direct audio link",
-                    key="castmagic_url"
-                )
-                st.caption("Supports: YouTube, mp4, mp3, wav, m4a, aac")
-
-                col1, col2 = st.columns(2)
-                with col1:
-                    language = st.selectbox(
-                        "Language",
-                        ["en", "es", "fr", "de", "it", "pt", "nl", "ja", "ko", "zh"],
-                        key="castmagic_lang"
-                    )
-                with col2:
-                    auto_detect = st.checkbox("Auto-detect", key="castmagic_auto")
-
-                if st.button("🚀 Start Transcription", use_container_width=True, disabled=not audio_url):
-                    with st.spinner("Submitting to Cast Magic..."):
-                        success, message, transcript_id = cm_client.submit_transcription(
-                            url=audio_url,
-                            language_code=language,
-                            auto_detect_language=auto_detect
-                        )
-                        if success and transcript_id:
-                            st.success(f"Submitted! ID: {transcript_id}")
-                            # Store as pending
-                            db.upsert_castmagic_transcript(
-                                transcript_id=transcript_id,
-                                title=f"Processing: {audio_url[:50]}...",
-                                source_url=audio_url,
-                                status="pending",
-                                duration_seconds=None,
-                                language=language,
-                                transcript_text=None,
-                                content_text=""
-                            )
-                            st.rerun()
-                        else:
-                            st.error(message)
-
-            # List transcripts
-            st.divider()
-            transcripts = db.get_castmagic_transcripts()
-
-            if transcripts:
-                st.caption(f"**Your Transcripts ({len(transcripts)}):**")
-
-                for t in transcripts[:10]:
-                    status_icon = "✅" if t['status'] == 'completed' else "⏳" if t['status'] in ['pending', 'processing'] else "❌"
-                    title = t['title'] or "Untitled"
-                    duration = format_duration(t['duration_seconds']) if t['duration_seconds'] else ""
-
-                    col1, col2 = st.columns([5, 1])
-                    with col1:
-                        st.text(f"{status_icon} {title[:30]} {duration}")
-                    with col2:
-                        if t['status'] in ['pending', 'processing']:
-                            if st.button("🔄", key=f"refresh_{t['id']}", help="Check status"):
-                                transcript = cm_client.get_transcript(t['id'])
-                                if transcript and transcript.status == 'completed':
-                                    content_text = cm_client.transcript_to_text(transcript)
-                                    db.upsert_castmagic_transcript(
-                                        transcript_id=transcript.id,
-                                        title=transcript.title,
-                                        source_url=transcript.source_url,
-                                        status=transcript.status,
-                                        duration_seconds=transcript.duration_seconds,
-                                        language=transcript.language,
-                                        transcript_text=transcript.transcript_text,
-                                        content_text=content_text
-                                    )
-                                    st.success("Transcript ready!")
-                                    st.rerun()
-                                elif transcript:
-                                    st.info(f"Status: {transcript.status}")
-                        else:
-                            if st.button("🗑", key=f"del_cm_{t['id']}", help="Delete"):
-                                db.delete_castmagic_transcript(t['id'])
-                                st.rerun()
-            else:
-                st.caption("No transcripts yet. Submit an audio URL above!")
-
-        else:
-            st.info("Add Cast Magic API key in API Keys tab")
-            st.markdown("""
-            **Cast Magic** transcribes your podcasts, webinars, and video content.
-
-            Once transcribed, you can:
-            - Search across all your audio content
-            - Apply Trello prompts to transcripts
-            - Generate content for clients
-
-            [Learn more](https://castmagic.io)
-            """)
-
-    with tab4:
         st.subheader("Client Profiles")
         st.caption("Add clients for personalized outputs")
 
@@ -618,6 +596,58 @@ with st.sidebar:
                         if st.session_state.selected_client == client['name']:
                             st.session_state.selected_client = None
                         st.rerun()
+
+    with tab4:
+        st.subheader("🚀 Future Enhancements")
+        st.caption("Unlock the full potential of your Marketing Brain.")
+
+        st.markdown("### 🎙️ [CastMagic](https://castmagic.io) Integration")
+        
+        cm_features = [
+             ("🪄 Auto-Transcribe", "Auto-ingest full transcripts from your podcasts and YouTube videos."),
+             ("🏃‍♂️ Run on CastMagic", "Found a Trello prompt? Run it on your audio transcripts instantly."),
+             ("🔄 Sync to CastMagic", "Push generated insights back to CastMagic as show notes."),
+        ]
+
+        for i, (title, desc) in enumerate(cm_features):
+            st.markdown(f"""
+            <div class="premium-card-c">
+                <div class="premium-text-group">
+                    <p class="premium-title">{title}</p>
+                    <p class="premium-desc">{desc}</p>
+                </div>
+                <button class="upgrade-btn-c">Get PRO</button>
+            </div>
+            """, unsafe_allow_html=True)
+            
+        st.markdown("### 🧠 General Enhancements")
+        
+        premium_features = [
+            ("🎙️ Voice Command", "Talk to your brain hands-free while driving or walking."),
+            ("🕸️ Visual Graph", "3D interactive map showing hidden connections between cards."),
+            ("✨ Magic Drafter", "One-click generation for Emails, Webinars, and LinkedIn posts."),
+            ("📱 Mobile App", "Native mobile experience with push notifications."),
+            ("🔗 Zapier Connect", "Auto-trigger new research when you add a Trello card.")
+        ]
+
+        for i, (title, desc) in enumerate(premium_features):
+            st.markdown(f"""
+            <div class="premium-card-c">
+                <div class="premium-text-group">
+                    <p class="premium-title">{title}</p>
+                    <p class="premium-desc">{desc}</p>
+                </div>
+                <button class="upgrade-btn-c">Get PRO</button>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        st.divider()
+        st.caption("✅ **Included in Current Plan:**")
+        st.caption("• 🕵️ Lazy RAG Search (Unlimited)")
+        st.caption("• 📎 PDF & Doc Ingestion")
+        st.caption("• 🔄 Live Trello Sync")
+        st.caption("• 🧠 Persistent Memory")
+
 
     st.divider()
 
@@ -740,11 +770,12 @@ st.divider()
 def render_with_copy(content: str, message_idx: int):
     """Render assistant response with copy buttons for full response and sections."""
     # Full response copy button at top
-    col1, col2 = st.columns([6, 1])
+    # Full response copy button at top (Small and subtle)
+    col1, col2 = st.columns([12, 1])
     with col2:
-        if st.button("📋 Copy All", key=f"copy_all_{message_idx}", help="Copy entire response"):
-            st.session_state[f"copied_{message_idx}"] = True
-            st.toast("Copied to clipboard!")
+        if st.button("📋", key=f"copy_all_{message_idx}", help="Copy full response"):
+            st.code(content, language=None)
+            st.toast("Response expanded for copying!", icon="📋")
 
     # Show copy confirmation
     if st.session_state.get(f"copied_{message_idx}"):
@@ -779,17 +810,11 @@ def render_with_copy(content: str, message_idx: int):
                             st.markdown(f"## {section['title']}")
                         st.markdown(section["content"])
                     with sec_col2:
-                        if st.button("📋", key=f"copy_sec_{message_idx}_{idx}", help=f"Copy: {section['title'][:20]}"):
-                            full_section = f"## {section['title']}\n{section['content']}" if section["title"] != "Response" else section["content"]
-                            st.session_state[f"copied_sec_{message_idx}_{idx}"] = full_section
-
-                    # Show section copy area if clicked
-                    if st.session_state.get(f"copied_sec_{message_idx}_{idx}"):
-                        st.code(st.session_state[f"copied_sec_{message_idx}_{idx}"], language=None)
-                        st.caption("👆 Select and copy")
-                        if st.button("Hide", key=f"hide_sec_{message_idx}_{idx}"):
-                            del st.session_state[f"copied_sec_{message_idx}_{idx}"]
-                            st.rerun()
+                        # Subtle copy button for section
+                        if st.button("📑", key=f"copy_sec_{message_idx}_{idx}", help=f"Copy section: {section['title']}"):
+                             full_section = f"## {section['title']}\n{section['content']}" if section["title"] != "Response" else section["content"]
+                             st.code(full_section, language=None)
+                             st.toast(f"Section '{section['title']}' ready to copy!", icon="📑")
         else:
             # Single section - just render normally
             st.markdown(content)

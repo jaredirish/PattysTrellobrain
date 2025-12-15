@@ -326,25 +326,36 @@ with st.sidebar:
 
         client = get_trello_client()
         if client:
-            if st.button("🔄 Sync Trello", use_container_width=True):
-                scheduler = SyncScheduler(client, db)
-                progress_bar = st.progress(0)
-                status_text = st.empty()
+            # Test connection first
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("🔌 Test Connection", use_container_width=True):
+                    with st.spinner("Testing..."):
+                        success, msg = client.test_connection()
+                        if success:
+                            st.success(msg)
+                        else:
+                            st.error(msg)
+            with col2:
+                if st.button("🔄 Sync All Boards", use_container_width=True):
+                    scheduler = SyncScheduler(client, db)
+                    progress_bar = st.progress(0)
+                    status_text = st.empty()
 
-                def update_progress(current, total, message):
-                    if total > 0:
-                        progress_bar.progress(current / total)
-                    status_text.text(message)
+                    def update_progress(current, total, message):
+                        if total > 0:
+                            progress_bar.progress(current / total)
+                        status_text.text(message)
 
-                success, message = scheduler.sync_trello_data(progress_callback=update_progress)
-                progress_bar.empty()
-                status_text.empty()
+                    success, message = scheduler.sync_trello_data(progress_callback=update_progress)
+                    progress_bar.empty()
+                    status_text.empty()
 
-                if success:
-                    st.success(message)
-                    st.rerun()
-                else:
-                    st.error(message)
+                    if success:
+                        st.success(message)
+                        st.rerun()
+                    else:
+                        st.error(message)
 
             # Board summary
             if stats["boards"]:

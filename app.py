@@ -256,7 +256,18 @@ with st.sidebar:
         st.caption("Keys are saved locally and persist across sessions.")
 
         # --- Gemini ---
-        gemini_status = "⚪" if not st.session_state.get("gemini_api_key") else "✅"
+        gemini_key_value = st.session_state.get("gemini_api_key", "")
+        gemini_validated = db.get_metadata("api_validated_gemini") == "true"
+        if not gemini_key_value:
+            gemini_status = "⚪"
+            gemini_status_text = "Not configured"
+        elif gemini_validated:
+            gemini_status = "✅"
+            gemini_status_text = "Ready"
+        else:
+            gemini_status = "❓"
+            gemini_status_text = "Not tested"
+
         st.markdown(f"**{gemini_status} Gemini API** [🔗 Get Key](https://aistudio.google.com/app/apikey)")
         gemini_key = st.text_input(
             "Gemini API Key",
@@ -265,16 +276,48 @@ with st.sidebar:
             label_visibility="collapsed",
             placeholder="Paste your Gemini API key"
         )
+
         if gemini_key:
+            # Save if changed
             if gemini_key != db.get_metadata("api_key_gemini"):
                 db.set_metadata("api_key_gemini", gemini_key)
-            st.caption("✅ Saved & ready")
+                db.set_metadata("api_validated_gemini", "false")  # Reset validation
+
+            # Test button
+            col1, col2 = st.columns([3, 1])
+            with col2:
+                if st.button("Test", key="test_gemini", use_container_width=True):
+                    with st.spinner("🔄"):
+                        try:
+                            genai.configure(api_key=gemini_key)
+                            model = genai.GenerativeModel('gemini-1.5-flash')
+                            model.generate_content("Say 'ok'")
+                            db.set_metadata("api_validated_gemini", "true")
+                            st.success("✅ Valid!")
+                            st.rerun()
+                        except Exception as e:
+                            db.set_metadata("api_validated_gemini", "false")
+                            st.error(f"❌ Invalid: {str(e)[:50]}")
+            with col1:
+                if gemini_validated:
+                    st.caption("✅ Tested & ready")
+                else:
+                    st.caption("❓ Click Test to validate")
 
         st.markdown("---")
 
         # --- Trello ---
-        trello_has_keys = st.session_state.get("trello_api_key") and st.session_state.get("trello_token")
-        trello_status = "✅" if trello_has_keys else "⚪"
+        trello_key_value = st.session_state.get("trello_api_key", "")
+        trello_token_value = st.session_state.get("trello_token", "")
+        trello_validated = db.get_metadata("api_validated_trello") == "true"
+
+        if not trello_key_value or not trello_token_value:
+            trello_status = "⚪"
+        elif trello_validated:
+            trello_status = "✅"
+        else:
+            trello_status = "❓"
+
         st.markdown(f"**{trello_status} Trello API** [🔗 Get Keys](https://trello.com/power-ups/admin)")
         st.caption("Create a Power-Up → copy API Key → click 'Token' link")
 
@@ -294,16 +337,44 @@ with st.sidebar:
         )
 
         if trello_api_key and trello_token:
-            if trello_api_key != db.get_metadata("api_key_trello"):
+            # Save if changed
+            if trello_api_key != db.get_metadata("api_key_trello") or trello_token != db.get_metadata("api_key_trello_token"):
                 db.set_metadata("api_key_trello", trello_api_key)
-            if trello_token != db.get_metadata("api_key_trello_token"):
                 db.set_metadata("api_key_trello_token", trello_token)
-            st.caption("✅ Keys saved")
+                db.set_metadata("api_validated_trello", "false")
+
+            col1, col2 = st.columns([3, 1])
+            with col2:
+                if st.button("Test", key="test_trello", use_container_width=True):
+                    with st.spinner("🔄"):
+                        client = TrelloClient(trello_api_key, trello_token)
+                        success, msg = client.test_connection()
+                        if success:
+                            db.set_metadata("api_validated_trello", "true")
+                            st.success(f"✅ {msg}")
+                            st.rerun()
+                        else:
+                            db.set_metadata("api_validated_trello", "false")
+                            st.error(f"❌ {msg}")
+            with col1:
+                if trello_validated:
+                    st.caption("✅ Tested & ready")
+                else:
+                    st.caption("❓ Click Test to validate")
 
         st.markdown("---")
 
         # --- Cast Magic ---
-        castmagic_status = "⚪" if not st.session_state.get("castmagic_api_key") else "✅"
+        castmagic_key_value = st.session_state.get("castmagic_api_key", "")
+        castmagic_validated = db.get_metadata("api_validated_castmagic") == "true"
+
+        if not castmagic_key_value:
+            castmagic_status = "⚪"
+        elif castmagic_validated:
+            castmagic_status = "✅"
+        else:
+            castmagic_status = "❓"
+
         st.markdown(f"**{castmagic_status} Cast Magic API** [🔗 Request Access](https://castmagic.io)")
         st.caption("Email justin@castmagic.io for developer API access")
 
@@ -314,10 +385,30 @@ with st.sidebar:
             label_visibility="collapsed",
             placeholder="Cast Magic API Secret"
         )
+
         if castmagic_key:
             if castmagic_key != db.get_metadata("api_key_castmagic"):
                 db.set_metadata("api_key_castmagic", castmagic_key)
-            st.caption("✅ Saved")
+                db.set_metadata("api_validated_castmagic", "false")
+
+            col1, col2 = st.columns([3, 1])
+            with col2:
+                if st.button("Test", key="test_castmagic", use_container_width=True):
+                    with st.spinner("🔄"):
+                        cm_client = CastMagicClient(castmagic_key)
+                        success, msg = cm_client.test_connection()
+                        if success:
+                            db.set_metadata("api_validated_castmagic", "true")
+                            st.success(f"✅ {msg}")
+                            st.rerun()
+                        else:
+                            db.set_metadata("api_validated_castmagic", "false")
+                            st.error(f"❌ {msg}")
+            with col1:
+                if castmagic_validated:
+                    st.caption("✅ Tested & ready")
+                else:
+                    st.caption("❓ Click Test to validate")
 
     with tab2:
         st.subheader("Trello Sync")

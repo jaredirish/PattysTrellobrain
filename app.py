@@ -71,6 +71,23 @@ if "selected_client" not in st.session_state:
 if "castmagic_pending" not in st.session_state:
     st.session_state.castmagic_pending = []
 
+# Load stored API keys from database
+if "keys_loaded" not in st.session_state:
+    st.session_state.keys_loaded = True
+    stored_gemini = db.get_metadata("api_key_gemini")
+    stored_trello_key = db.get_metadata("api_key_trello")
+    stored_trello_token = db.get_metadata("api_key_trello_token")
+    stored_castmagic = db.get_metadata("api_key_castmagic")
+
+    if stored_gemini:
+        st.session_state.gemini_api_key = stored_gemini
+    if stored_trello_key:
+        st.session_state.trello_api_key = stored_trello_key
+    if stored_trello_token:
+        st.session_state.trello_token = stored_trello_token
+    if stored_castmagic:
+        st.session_state.castmagic_api_key = stored_castmagic
+
 
 # --- HELPER FUNCTIONS ---
 
@@ -236,41 +253,73 @@ with st.sidebar:
 
     with tab1:
         st.subheader("API Configuration")
+        st.caption("Keys are saved locally and persist across sessions.")
 
+        # --- Gemini ---
+        st.markdown("**Gemini API** [🔗 Get Key](https://aistudio.google.com/app/apikey)")
         gemini_key = st.text_input(
             "Gemini API Key",
             type="password",
             key="gemini_api_key",
-            help="Free at aistudio.google.com"
+            label_visibility="collapsed",
+            placeholder="Paste your Gemini API key"
         )
         if gemini_key:
-            st.success("Gemini ready!")
+            if gemini_key != db.get_metadata("api_key_gemini"):
+                db.set_metadata("api_key_gemini", gemini_key)
+            st.success("✓ Gemini saved & ready!")
 
         st.markdown("---")
-        st.caption("**Trello Credentials**")
-        st.markdown("[Get keys here](https://trello.com/power-ups/admin)")
 
-        trello_api_key = st.text_input("Trello API Key", type="password", key="trello_api_key")
-        trello_token = st.text_input("Trello Token", type="password", key="trello_token")
+        # --- Trello ---
+        st.markdown("**Trello API** [🔗 Get Keys](https://trello.com/power-ups/admin)")
+        st.caption("Create a Power-Up → copy API Key → click 'Token' link")
+
+        trello_api_key = st.text_input(
+            "Trello API Key",
+            type="password",
+            key="trello_api_key",
+            label_visibility="collapsed",
+            placeholder="Trello API Key"
+        )
+        trello_token = st.text_input(
+            "Trello Token",
+            type="password",
+            key="trello_token",
+            label_visibility="collapsed",
+            placeholder="Trello Token"
+        )
+
+        if trello_api_key and trello_token:
+            if trello_api_key != db.get_metadata("api_key_trello"):
+                db.set_metadata("api_key_trello", trello_api_key)
+            if trello_token != db.get_metadata("api_key_trello_token"):
+                db.set_metadata("api_key_trello_token", trello_token)
+            st.success("✓ Trello keys saved!")
 
         st.markdown("---")
-        st.caption("**Cast Magic API**")
-        st.markdown("Contact justin@castmagic.io for API access")
+
+        # --- Cast Magic ---
+        st.markdown("**Cast Magic API** [🔗 Request Access](https://castmagic.io)")
+        st.caption("Email justin@castmagic.io for developer API access")
 
         castmagic_key = st.text_input(
             "Cast Magic API Secret",
             type="password",
             key="castmagic_api_key",
-            help="Get developer access at castmagic.io"
+            label_visibility="collapsed",
+            placeholder="Cast Magic API Secret"
         )
         if castmagic_key:
+            if castmagic_key != db.get_metadata("api_key_castmagic"):
+                db.set_metadata("api_key_castmagic", castmagic_key)
             cm_client = get_castmagic_client()
             if cm_client:
                 success, msg = cm_client.test_connection()
                 if success:
-                    st.success("Cast Magic connected!")
+                    st.success("✓ Cast Magic saved & connected!")
                 else:
-                    st.warning(f"Cast Magic: {msg}")
+                    st.warning(f"Saved but: {msg}")
 
     with tab2:
         st.subheader("Trello Sync")

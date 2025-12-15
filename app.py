@@ -256,7 +256,8 @@ with st.sidebar:
         st.caption("Keys are saved locally and persist across sessions.")
 
         # --- Gemini ---
-        st.markdown("**Gemini API** [🔗 Get Key](https://aistudio.google.com/app/apikey)")
+        gemini_status = "⚪" if not st.session_state.get("gemini_api_key") else "✅"
+        st.markdown(f"**{gemini_status} Gemini API** [🔗 Get Key](https://aistudio.google.com/app/apikey)")
         gemini_key = st.text_input(
             "Gemini API Key",
             type="password",
@@ -267,12 +268,14 @@ with st.sidebar:
         if gemini_key:
             if gemini_key != db.get_metadata("api_key_gemini"):
                 db.set_metadata("api_key_gemini", gemini_key)
-            st.success("✓ Gemini saved & ready!")
+            st.caption("✅ Saved & ready")
 
         st.markdown("---")
 
         # --- Trello ---
-        st.markdown("**Trello API** [🔗 Get Keys](https://trello.com/power-ups/admin)")
+        trello_has_keys = st.session_state.get("trello_api_key") and st.session_state.get("trello_token")
+        trello_status = "✅" if trello_has_keys else "⚪"
+        st.markdown(f"**{trello_status} Trello API** [🔗 Get Keys](https://trello.com/power-ups/admin)")
         st.caption("Create a Power-Up → copy API Key → click 'Token' link")
 
         trello_api_key = st.text_input(
@@ -295,12 +298,13 @@ with st.sidebar:
                 db.set_metadata("api_key_trello", trello_api_key)
             if trello_token != db.get_metadata("api_key_trello_token"):
                 db.set_metadata("api_key_trello_token", trello_token)
-            st.success("✓ Trello keys saved!")
+            st.caption("✅ Keys saved")
 
         st.markdown("---")
 
         # --- Cast Magic ---
-        st.markdown("**Cast Magic API** [🔗 Request Access](https://castmagic.io)")
+        castmagic_status = "⚪" if not st.session_state.get("castmagic_api_key") else "✅"
+        st.markdown(f"**{castmagic_status} Cast Magic API** [🔗 Request Access](https://castmagic.io)")
         st.caption("Email justin@castmagic.io for developer API access")
 
         castmagic_key = st.text_input(
@@ -313,13 +317,7 @@ with st.sidebar:
         if castmagic_key:
             if castmagic_key != db.get_metadata("api_key_castmagic"):
                 db.set_metadata("api_key_castmagic", castmagic_key)
-            cm_client = get_castmagic_client()
-            if cm_client:
-                success, msg = cm_client.test_connection()
-                if success:
-                    st.success("✓ Cast Magic saved & connected!")
-                else:
-                    st.warning(f"Saved but: {msg}")
+            st.caption("✅ Saved")
 
     with tab2:
         st.subheader("Trello Sync")

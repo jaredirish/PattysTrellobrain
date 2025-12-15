@@ -1,0 +1,188 @@
+Project: Patty's Knowledge Brain (The "Lazy RAG" Solution)
+Status: Ready for Deployment
+Owner: Jared Irish
+User: Patty (Marketing Advisor)
+Problem Solved: "I have hundreds of Trello boards and folders of live documents, and it takes me too long to find the thing."
+1. Context & User Persona
+The User: Patty
+ * Role: High-level Marketing Advisor & Strategist.
+ * Workflow: She consumes high-value AI Mastermind content (97/month courses) and creates "Live Documents" for her clients.
+ * Pain Point: She is a "Digital Hoarder" of high-value IP. She has:
+   * 300+ Trello Boards: Organized by topic (Sales, Images, Clients), but searching across them is impossible.
+   * "Live Documents": Google Docs with transcripts, chat logs, and prompts from webinars.
+   * Fragmentation: She knows she has the answer (e.g., "Veronica's prompt for webinars"), but finding it takes 20 minutes of digging.
+ * Goal: "I want to upload them all together and just tell me things." She needs a "Marketing Librarian" that instantly retrieves specific frameworks from her chaotic archive.
+ * Tech Level: Non-coder, but highly AI-literate. She understands prompts, agents, and GPTs, but she is overwhelmed by the admin of managing them.
+The Opportunity
+Patty represents a massive B2B demographic: Knowledge Workers with "Asset Fragmentation." Solving this for her validates the "Search" pillar of EstateGenie (organizing chaos into value).
+2. Technical Architecture: "Lazy RAG"
+We are bypassing the complexity of traditional RAG (Vector Databases, Embeddings, Pinecone) in favor of Gemini 1.5 Flash's Massive Context Window.
+ * Why?
+   * Simplicity: Zero database setup. Zero cost.
+   * Accuracy: "Global Context" (seeing all files at once) is often better than "Chunked Retrieval" for reasoning tasks like "Combine frameworks A and B."
+   * Volume: Gemini 1.5 Flash supports 1 Million Tokens (approx. 1,500 pages of text). This is more than enough for Patty's current Trello exports and PDFs.
+The Stack
+ * Frontend: Streamlit (Python web framework).
+ * Backend: Google Gemini 1.5 Flash API.
+ * Hosting: Streamlit Community Cloud (Free).
+ * Ingestion: pypdf for eBooks/transcripts, Python native I/O for text/markdown.
+3. Implementation Code
+File 1: requirements.txt
+streamlit
+google-generativeai
+pypdf
+
+File 2: app.py
+import streamlit as st
+import google.generativeai as genai
+import os
+from io import BytesIO
+import pypdf
+
+# --- CONFIGURATION ---
+st.set_page_config(page_title="Patty's Marketing Brain", page_icon="🧠", layout="wide")
+
+# --- SIDEBAR: SETUP ---
+with st.sidebar:
+    st.title("🧠 Knowledge Base")
+    st.markdown("Upload your Trello exports, PDFs, and Zoom transcripts here.")
+    
+    # API Key Input
+    api_key = st.text_input("Gemini API Key", type="password", help="Get one at aistudio.google.com (It's free)")
+    
+    if api_key:
+        genai.configure(api_key=api_key)
+    
+    # File Uploader
+    uploaded_files = st.file_uploader(
+        "Upload Documents", 
+        type=["txt", "pdf", "md", "csv"], 
+        accept_multiple_files=True
+    )
+    
+    if st.button("Clear Chat"):
+        st.session_state.messages = []
+
+# --- MAIN APP LOGIC ---
+
+# Initialize chat history
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
+# Initialize context cache
+if "context_text" not in st.session_state:
+    st.session_state.context_text = ""
+
+def extract_text_from_pdf(file_bytes):
+    """Extracts text from a PDF file using pypdf."""
+    try:
+        pdf_reader = pypdf.PdfReader(BytesIO(file_bytes))
+        text = ""
+        for page in pdf_reader.pages:
+            text += page.extract_text() + "\n"
+        return text
+    except Exception as e:
+        return f"[Error reading PDF: {e}]"
+
+def process_files(files):
+    """Reads and combines text from all uploaded files."""
+    combined_text = ""
+    for uploaded_file in files:
+        file_extension = uploaded_file.name.split('.')[-1].lower()
+        file_bytes = uploaded_file.getvalue()
+        
+        content = ""
+        if file_extension == 'pdf':
+            content = extract_text_from_pdf(file_bytes)
+        else:
+            # Assume text/md/csv
+            try:
+                content = file_bytes.decode("utf-8")
+            except:
+                content = "[Error decoding text file]"
+        
+        combined_text += f"\n\n--- DOCUMENT: {uploaded_file.name} ---\n{content}"
+        
+    return combined_text
+
+# Header
+st.header("Ask Your Content Library")
+st.caption("Stop searching folders. Just ask.")
+
+# 1. Process Uploads
+if uploaded_files and api_key:
+    if st.sidebar.button("Index Documents"):
+        with st.spinner("Reading your brilliance..."):
+            st.session_state.context_text = process_files(uploaded_files)
+            st.sidebar.success(f"Indexed {len(uploaded_files)} files! ({len(st.session_state.context_text)} chars)")
+
+# 2. Chat Interface
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# 3. Handle User Input
+if prompt := st.chat_input("Ex: 'Write a prompt sequence for the webinar based on Veronica's call'"):
+    if not api_key:
+        st.error("Please enter an API Key in the sidebar.")
+        st.stop()
+        
+    if not st.session_state.context_text:
+        st.warning("Please upload and index some documents first!")
+        st.stop()
+
+    # User message
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+
+    # Generate Response
+    with st.chat_message("assistant"):
+        with st.spinner("Thinking..."):
+            try:
+                model = genai.GenerativeModel('gemini-1.5-flash')
+                
+                # We send the ENTIRE context every time. 
+                # This works because Gemini 1.5 Flash has a 1M token window.
+                full_prompt = f"""
+                You are a Marketing Knowledge Assistant. 
+                Answer the user's question based strictly on the provided context below.
+                If the answer isn't in the context, say "I don't see that in your uploaded docs."
+                
+                CONTEXT LIBRARY:
+                {st.session_state.context_text}
+                
+                USER QUESTION:
+                {prompt}
+                """
+                
+                response = model.generate_content(full_prompt)
+                st.markdown(response.text)
+                st.session_state.messages.append({"role": "assistant", "content": response.text})
+                
+            except Exception as e:
+                st.error(f"An error occurred: {e}")
+
+4. Deployment Guide (Send this to Patty if she wants to own it)
+Prerequisites
+ * GitHub Account: You need a place to store the code.
+ * Google AI Studio Account: To get the free API key.
+Step 1: Push Code to GitHub
+ * Create a new repository named marketing-brain.
+ * Upload app.py and requirements.txt.
+Step 2: Deploy on Streamlit Cloud
+ * Go to share.streamlit.io.
+ * Click "New App".
+ * Select your GitHub repo (marketing-brain).
+ * Click "Deploy".
+ * Wait 2 minutes. Done.
+Step 3: Use It
+ * Go to Google AI Studio and create a key.
+ * Paste the key into the sidebar of your new app.
+ * Drag and drop your PDF/Text files.
+ * Click "Index."
+ * Start chatting.
+5. Future Roadmap (If she loves it)
+ * Trello API Integration: Instead of manual exports, build a connector that pulls her cards automatically via the Trello API.
+ * Voice Input: Use the Web Speech API to let her talk to her brain ("Hey, find that email sequence...").
+ * Persistent Memory: Currently, this app resets when you close the tab. Adding a simple SQLite database would let her keep her "Brain" active permanently.

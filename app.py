@@ -636,10 +636,71 @@ if has_content and gemini_ready:
 
 st.divider()
 
+# Helper function to render response with copy buttons
+def render_with_copy(content: str, message_idx: int):
+    """Render assistant response with copy buttons for full response and sections."""
+    # Full response copy button at top
+    col1, col2 = st.columns([6, 1])
+    with col2:
+        if st.button("📋 Copy All", key=f"copy_all_{message_idx}", help="Copy entire response"):
+            st.session_state[f"copied_{message_idx}"] = True
+            st.toast("Copied to clipboard!")
+
+    # Show copy confirmation
+    if st.session_state.get(f"copied_{message_idx}"):
+        st.code(content, language=None)
+        st.caption("👆 Select all and copy (Ctrl+A, Ctrl+C)")
+        if st.button("Hide", key=f"hide_{message_idx}"):
+            st.session_state[f"copied_{message_idx}"] = False
+            st.rerun()
+    else:
+        # Parse sections (split by ## headers) for individual copy
+        sections = []
+        current_section = {"title": "Response", "content": ""}
+
+        for line in content.split('\n'):
+            if line.startswith('## '):
+                if current_section["content"].strip():
+                    sections.append(current_section)
+                current_section = {"title": line[3:].strip(), "content": ""}
+            else:
+                current_section["content"] += line + "\n"
+
+        if current_section["content"].strip():
+            sections.append(current_section)
+
+        # Render sections with mini copy buttons if multiple sections
+        if len(sections) > 1:
+            for idx, section in enumerate(sections):
+                with st.container():
+                    sec_col1, sec_col2 = st.columns([10, 1])
+                    with sec_col1:
+                        if section["title"] != "Response":
+                            st.markdown(f"## {section['title']}")
+                        st.markdown(section["content"])
+                    with sec_col2:
+                        if st.button("📋", key=f"copy_sec_{message_idx}_{idx}", help=f"Copy: {section['title'][:20]}"):
+                            full_section = f"## {section['title']}\n{section['content']}" if section["title"] != "Response" else section["content"]
+                            st.session_state[f"copied_sec_{message_idx}_{idx}"] = full_section
+
+                    # Show section copy area if clicked
+                    if st.session_state.get(f"copied_sec_{message_idx}_{idx}"):
+                        st.code(st.session_state[f"copied_sec_{message_idx}_{idx}"], language=None)
+                        st.caption("👆 Select and copy")
+                        if st.button("Hide", key=f"hide_sec_{message_idx}_{idx}"):
+                            del st.session_state[f"copied_sec_{message_idx}_{idx}"]
+                            st.rerun()
+        else:
+            # Single section - just render normally
+            st.markdown(content)
+
 # Chat history
-for message in st.session_state.messages:
+for idx, message in enumerate(st.session_state.messages):
     with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+        if message["role"] == "assistant":
+            render_with_copy(message["content"], idx)
+        else:
+            st.markdown(message["content"])
 
 # Chat input
 if prompt := st.chat_input("Ex: 'Apply the webinar framework to my latest podcast' or 'Find prompts for Karen'"):
@@ -663,9 +724,9 @@ if prompt := st.chat_input("Ex: 'Apply the webinar framework to my latest podcas
         with st.spinner("Searching your knowledge base..."):
             response = run_query(prompt)
             if response:
-                st.markdown(response)
                 st.session_state.messages.append({"role": "assistant", "content": response})
                 db.add_chat_message("assistant", response)
+                st.rerun()  # Rerun to render with copy buttons
 
 
 # --- FOOTER ---

@@ -2,8 +2,8 @@
 Patty's Knowledge Brain - Main Application
 
 A "Lazy RAG" solution using Gemini's massive context window to search
-across Trello boards and uploaded documents. Includes client profiles
-for applying frameworks to specific client needs.
+across Trello boards, uploaded documents, and Cast Magic transcripts.
+Includes client profiles for applying frameworks to specific client needs.
 """
 
 import streamlit as st
@@ -15,6 +15,7 @@ import pypdf
 
 from database import DatabaseManager
 from trello_client import TrelloClient
+from castmagic_client import CastMagicClient
 from scheduler import SyncScheduler
 
 # --- PAGE CONFIG ---
@@ -67,6 +68,9 @@ if "sync_status" not in st.session_state:
 if "selected_client" not in st.session_state:
     st.session_state.selected_client = None
 
+if "castmagic_pending" not in st.session_state:
+    st.session_state.castmagic_pending = []
+
 
 # --- HELPER FUNCTIONS ---
 
@@ -110,6 +114,14 @@ def get_trello_client():
     return None
 
 
+def get_castmagic_client():
+    """Create a Cast Magic client from session state credentials."""
+    api_secret = st.session_state.get("castmagic_api_key", "")
+    if api_secret:
+        return CastMagicClient(api_secret)
+    return None
+
+
 def format_time_ago(dt: datetime) -> str:
     """Format a datetime as a relative time string."""
     if dt is None:
@@ -127,6 +139,19 @@ def format_time_ago(dt: datetime) -> str:
         return f"{minutes} minute{'s' if minutes > 1 else ''} ago"
     else:
         return "Just now"
+
+
+def format_duration(seconds: float) -> str:
+    """Format seconds as mm:ss or hh:mm:ss."""
+    if seconds is None:
+        return "Unknown"
+    minutes = int(seconds / 60)
+    secs = int(seconds % 60)
+    if minutes >= 60:
+        hours = minutes // 60
+        minutes = minutes % 60
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes}:{secs:02d}"
 
 
 def run_query(prompt: str, include_client: bool = True):
@@ -151,14 +176,19 @@ YOUR MISSION:
 1. Find the relevant frameworks, prompts, and strategies from Patty's knowledge base
 2. Present them in a COPY-READY format she can immediately use
 3. When a client is specified, ADAPT the framework specifically for that client
-4. Be specific - quote card names, board names, and document names
+4. Be specific - quote card names, board names, document names, and transcript titles
 5. If you can't find something, say so clearly
+
+CONTENT SOURCES:
+- Trello cards (boards, lists, card content)
+- Uploaded documents (PDFs, transcripts, text files)
+- Cast Magic transcripts (podcast/video transcriptions with speaker labels)
 
 OUTPUT STYLE:
 - Lead with the actionable content (prompts, frameworks, sequences)
 - Use clear headers and bullet points
 - Make it COPY-PASTE ready
-- End with source attribution (which board/document this came from)
+- End with source attribution (which board/document/transcript this came from)
 
 {f'''ACTIVE CLIENT CONTEXT:
 {client_context}
@@ -188,19 +218,21 @@ with st.sidebar:
 
     # Quick stats
     stats = db.get_stats()
-    cols = st.columns(3)
+    cols = st.columns(4)
     with cols[0]:
         st.metric("Cards", stats["trello_cards"])
     with cols[1]:
         st.metric("Docs", stats["documents"])
     with cols[2]:
+        st.metric("Audio", stats["castmagic"])
+    with cols[3]:
         st.metric("Clients", stats["clients"])
 
     st.caption(f"Last sync: {format_time_ago(stats['last_sync'])}")
     st.divider()
 
     # --- Tabs for different settings ---
-    tab1, tab2, tab3 = st.tabs(["API Keys", "Trello", "Clients"])
+    tab1, tab2, tab3, tab4 = st.tabs(["API Keys", "Trello", "Cast Magic", "Clients"])
 
     with tab1:
         st.subheader("API Configuration")
@@ -221,12 +253,31 @@ with st.sidebar:
         trello_api_key = st.text_input("Trello API Key", type="password", key="trello_api_key")
         trello_token = st.text_input("Trello Token", type="password", key="trello_token")
 
+        st.markdown("---")
+        st.caption("**Cast Magic API**")
+        st.markdown("Contact justin@castmagic.io for API access")
+
+        castmagic_key = st.text_input(
+            "Cast Magic API Secret",
+            type="password",
+            key="castmagic_api_key",
+            help="Get developer access at castmagic.io"
+        )
+        if castmagic_key:
+            cm_client = get_castmagic_client()
+            if cm_client:
+                success, msg = cm_client.test_connection()
+                if success:
+                    st.success("Cast Magic connected!")
+                else:
+                    st.warning(f"Cast Magic: {msg}")
+
     with tab2:
         st.subheader("Trello Sync")
 
         client = get_trello_client()
         if client:
-            if st.button("🔄 Sync Now", use_container_width=True):
+            if st.button("🔄 Sync Trello", use_container_width=True):
                 scheduler = SyncScheduler(client, db)
                 progress_bar = st.progress(0)
                 status_text = st.empty()
@@ -277,6 +328,110 @@ with st.sidebar:
                 st.rerun()
 
     with tab3:
+        st.subheader("Cast Magic")
+        st.caption("Transcribe audio/video and add to your knowledge base")
+
+        cm_client = get_castmagic_client()
+        if cm_client:
+            # Submit new transcription
+            with st.expander("🎙 Submit Audio/Video", expanded=True):
+                audio_url = st.text_input(
+                    "Audio/Video URL",
+                    placeholder="YouTube URL or direct audio link",
+                    key="castmagic_url"
+                )
+                st.caption("Supports: YouTube, mp4, mp3, wav, m4a, aac")
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    language = st.selectbox(
+                        "Language",
+                        ["en", "es", "fr", "de", "it", "pt", "nl", "ja", "ko", "zh"],
+                        key="castmagic_lang"
+                    )
+                with col2:
+                    auto_detect = st.checkbox("Auto-detect", key="castmagic_auto")
+
+                if st.button("🚀 Start Transcription", use_container_width=True, disabled=not audio_url):
+                    with st.spinner("Submitting to Cast Magic..."):
+                        success, message, transcript_id = cm_client.submit_transcription(
+                            url=audio_url,
+                            language_code=language,
+                            auto_detect_language=auto_detect
+                        )
+                        if success and transcript_id:
+                            st.success(f"Submitted! ID: {transcript_id}")
+                            # Store as pending
+                            db.upsert_castmagic_transcript(
+                                transcript_id=transcript_id,
+                                title=f"Processing: {audio_url[:50]}...",
+                                source_url=audio_url,
+                                status="pending",
+                                duration_seconds=None,
+                                language=language,
+                                transcript_text=None,
+                                content_text=""
+                            )
+                            st.rerun()
+                        else:
+                            st.error(message)
+
+            # List transcripts
+            st.divider()
+            transcripts = db.get_castmagic_transcripts()
+
+            if transcripts:
+                st.caption(f"**Your Transcripts ({len(transcripts)}):**")
+
+                for t in transcripts[:10]:
+                    status_icon = "✅" if t['status'] == 'completed' else "⏳" if t['status'] in ['pending', 'processing'] else "❌"
+                    title = t['title'] or "Untitled"
+                    duration = format_duration(t['duration_seconds']) if t['duration_seconds'] else ""
+
+                    col1, col2 = st.columns([5, 1])
+                    with col1:
+                        st.text(f"{status_icon} {title[:30]} {duration}")
+                    with col2:
+                        if t['status'] in ['pending', 'processing']:
+                            if st.button("🔄", key=f"refresh_{t['id']}", help="Check status"):
+                                transcript = cm_client.get_transcript(t['id'])
+                                if transcript and transcript.status == 'completed':
+                                    content_text = cm_client.transcript_to_text(transcript)
+                                    db.upsert_castmagic_transcript(
+                                        transcript_id=transcript.id,
+                                        title=transcript.title,
+                                        source_url=transcript.source_url,
+                                        status=transcript.status,
+                                        duration_seconds=transcript.duration_seconds,
+                                        language=transcript.language,
+                                        transcript_text=transcript.transcript_text,
+                                        content_text=content_text
+                                    )
+                                    st.success("Transcript ready!")
+                                    st.rerun()
+                                elif transcript:
+                                    st.info(f"Status: {transcript.status}")
+                        else:
+                            if st.button("🗑", key=f"del_cm_{t['id']}", help="Delete"):
+                                db.delete_castmagic_transcript(t['id'])
+                                st.rerun()
+            else:
+                st.caption("No transcripts yet. Submit an audio URL above!")
+
+        else:
+            st.info("Add Cast Magic API key in API Keys tab")
+            st.markdown("""
+            **Cast Magic** transcribes your podcasts, webinars, and video content.
+
+            Once transcribed, you can:
+            - Search across all your audio content
+            - Apply Trello prompts to transcripts
+            - Generate content for clients
+
+            [Learn more](https://castmagic.io)
+            """)
+
+    with tab4:
         st.subheader("Client Profiles")
         st.caption("Add clients for personalized outputs")
 
@@ -328,6 +483,7 @@ with st.sidebar:
         if st.button("Clear All", use_container_width=True):
             db.clear_trello_cards()
             db.clear_documents()
+            db.clear_castmagic_transcripts()
             db.clear_chat_history()
             st.session_state.messages = []
             st.session_state.selected_client = None
@@ -340,7 +496,7 @@ with st.sidebar:
 col1, col2 = st.columns([3, 1])
 with col1:
     st.header("🧠 Ask Your Knowledge Base")
-    st.caption("Find frameworks, prompts, and strategies. Get copy-ready output.")
+    st.caption("Search Trello, documents, and audio transcripts. Get copy-ready output.")
 
 with col2:
     clients = db.get_all_clients()
@@ -369,7 +525,7 @@ if st.session_state.selected_client:
 
 # Check prerequisites
 gemini_ready = bool(st.session_state.get("gemini_api_key"))
-has_content = stats["trello_cards"] > 0 or stats["documents"] > 0
+has_content = stats["trello_cards"] > 0 or stats["documents"] > 0 or stats["castmagic"] > 0
 
 if not gemini_ready:
     st.warning("👈 Enter your Gemini API key in the sidebar to get started.")
@@ -379,11 +535,13 @@ if not has_content:
     **No content yet!**
     1. **Sync Trello** - Add API keys in sidebar, then click Sync
     2. **Upload Docs** - Drop PDFs, transcripts, or text files
+    3. **Add Audio** - Use Cast Magic to transcribe podcasts/videos
 
     Once indexed, ask questions like:
     - "Find Veronica's webinar prompt sequence"
     - "What frameworks do I have for email sequences?"
     - "Apply the sales funnel template for Karen"
+    - "Summarize the key points from my latest podcast"
     """)
 
 # Quick Actions
@@ -392,9 +550,9 @@ if has_content and gemini_ready:
     cols = st.columns(4)
 
     quick_prompts = [
-        ("📋 List all frameworks", "List all the marketing frameworks, templates, and prompt sequences in my knowledge base. Group them by category."),
+        ("📋 List frameworks", "List all the marketing frameworks, templates, and prompt sequences in my knowledge base. Group them by category."),
         ("✉️ Email sequences", "Find all email sequence templates and frameworks. Show me the key steps for each."),
-        ("🎙 Webinar prompts", "Find any webinar-related prompts, scripts, or frameworks. Make them copy-ready."),
+        ("🎙 From transcripts", "What insights, quotes, or actionable tips are in my Cast Magic transcripts? Summarize by topic."),
         ("📊 Sales funnels", "What sales funnel templates or strategies do I have? Summarize the key stages.")
     ]
 
@@ -427,13 +585,13 @@ for message in st.session_state.messages:
         st.markdown(message["content"])
 
 # Chat input
-if prompt := st.chat_input("Ex: 'Find the prompt sequence for client onboarding' or 'Apply webinar framework for Karen'"):
+if prompt := st.chat_input("Ex: 'Apply the webinar framework to my latest podcast' or 'Find prompts for Karen'"):
     if not gemini_ready:
         st.error("Please enter a Gemini API key first.")
         st.stop()
 
     if not has_content:
-        st.warning("Please sync Trello or upload documents first!")
+        st.warning("Please sync Trello, upload documents, or add transcripts first!")
         st.stop()
 
     # Add user message
@@ -455,4 +613,4 @@ if prompt := st.chat_input("Ex: 'Find the prompt sequence for client onboarding'
 
 # --- FOOTER ---
 st.divider()
-st.caption(f"📊 {stats['trello_cards']} cards | {stats['documents']} docs | {stats['clients']} clients | Synced: {format_time_ago(stats['last_sync'])}")
+st.caption(f"📊 {stats['trello_cards']} cards | {stats['documents']} docs | {stats['castmagic']} transcripts | {stats['clients']} clients")

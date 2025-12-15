@@ -108,6 +108,22 @@ class DatabaseManager:
                 )
             """)
 
+            # Cast Magic transcripts table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS castmagic_transcripts (
+                    id TEXT PRIMARY KEY,
+                    title TEXT,
+                    source_url TEXT,
+                    status TEXT,
+                    duration_seconds REAL,
+                    language TEXT,
+                    transcript_text TEXT,
+                    content_text TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             # Create indexes for faster searches
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_cards_board
@@ -116,6 +132,10 @@ class DatabaseManager:
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_cards_synced
                 ON trello_cards(synced_at)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_castmagic_synced
+                ON castmagic_transcripts(synced_at)
             """)
 
     # --- Trello Cards ---
@@ -283,15 +303,18 @@ class DatabaseManager:
     # --- Combined Content ---
 
     def get_all_content(self) -> str:
-        """Get all content (Trello + Documents) as a combined string."""
+        """Get all content (Trello + Documents + Cast Magic) as a combined string."""
         trello_content = self.get_all_trello_content()
         doc_content = self.get_all_document_content()
+        castmagic_content = self.get_all_castmagic_content()
 
         parts = []
         if trello_content:
             parts.append("=== TRELLO CONTENT ===\n" + trello_content)
         if doc_content:
             parts.append("=== UPLOADED DOCUMENTS ===\n" + doc_content)
+        if castmagic_content:
+            parts.append("=== CAST MAGIC TRANSCRIPTS ===\n" + castmagic_content)
 
         return "\n\n".join(parts)
 
@@ -302,7 +325,8 @@ class DatabaseManager:
             "documents": self.get_document_count(),
             "last_sync": self.get_last_sync_time(),
             "boards": self.get_board_summary(),
-            "clients": self.get_client_count()
+            "clients": self.get_client_count(),
+            "castmagic": self.get_castmagic_count()
         }
 
     # --- Client Profiles ---
@@ -380,3 +404,71 @@ class DatabaseManager:
                 parts.append(f"Notes: {client['notes']}")
 
         return "\n".join(parts)
+
+    # --- Cast Magic Transcripts ---
+
+    def upsert_castmagic_transcript(
+        self,
+        transcript_id: str,
+        title: Optional[str],
+        source_url: str,
+        status: str,
+        duration_seconds: Optional[float],
+        language: Optional[str],
+        transcript_text: Optional[str],
+        content_text: str
+    ):
+        """Insert or update a Cast Magic transcript."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO castmagic_transcripts
+                (id, title, source_url, status, duration_seconds, language,
+                 transcript_text, content_text, synced_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+            """, (
+                transcript_id, title, source_url, status, duration_seconds,
+                language, transcript_text, content_text
+            ))
+
+    def get_castmagic_transcript(self, transcript_id: str) -> Optional[dict]:
+        """Get a Cast Magic transcript by ID."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM castmagic_transcripts WHERE id = ?", (transcript_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def get_all_castmagic_content(self) -> str:
+        """Get all Cast Magic transcript content as a combined text string."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT content_text FROM castmagic_transcripts WHERE status = 'completed' ORDER BY synced_at")
+            rows = cursor.fetchall()
+            return "\n\n".join(row["content_text"] for row in rows if row["content_text"])
+
+    def get_castmagic_transcripts(self) -> list[dict]:
+        """Get all Cast Magic transcripts."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM castmagic_transcripts ORDER BY synced_at DESC")
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_castmagic_count(self) -> int:
+        """Get the total number of Cast Magic transcripts."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) as count FROM castmagic_transcripts")
+            return cursor.fetchone()["count"]
+
+    def delete_castmagic_transcript(self, transcript_id: str):
+        """Delete a Cast Magic transcript."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM castmagic_transcripts WHERE id = ?", (transcript_id,))
+
+    def clear_castmagic_transcripts(self):
+        """Delete all Cast Magic transcripts."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM castmagic_transcripts")
